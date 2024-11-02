@@ -1,6 +1,6 @@
 {
   "name": "rn-chk-new-arch",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Check if libraries in a React Native project support the new architecture",
   "scripts": {
     "build": "tsc",
