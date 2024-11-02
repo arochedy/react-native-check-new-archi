@@ -59,6 +59,12 @@ To download and modify the code:
 git clone https://github.com/your-username/check-new-arch.git
 ```
 
+- Install dependencies
+
+```bash
+npm run build
+```
+
 - Compile the TypeScript code:
 
 ```bash

@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "@types/node": "^22.8.6",
-    "axios": "^x.x.x",
     "typescript": "^5.6.3"
   },
   "keywords": [
