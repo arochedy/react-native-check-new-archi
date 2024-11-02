@@ -1,0 +1,26 @@
+{
+  "name": "rn-chk-new-arch",
+  "version": "1.0.0",
+  "description": "Check if libraries in a React Native project support the new architecture",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "main": "dist/index.js",
+  "bin": {
+    "check-new-arch": "./dist/index.js"
+  },
+  "dependencies": {
+    "@types/node": "^22.8.6",
+    "axios": "^x.x.x",
+    "typescript": "^5.6.3"
+  },
+  "keywords": [
+    "react-native",
+    "architecture",
+    "libraries",
+    "newArchitecture"
+  ],
+  "author": "arochedy",
+  "license": "MIT"
+}
