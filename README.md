@@ -5,7 +5,7 @@ This package checks if the libraries used in a React Native project support the 
 ## Features
 
 - Checks each library in `package.json` to see if it supports the new architecture.
-- Uses React Native Directory API to fetch compatibility data.
+- Uses [React Native Directory API](https://reactnative.directory/) to fetch compatibility data.
 - If the library isn't found, it attempts to locate the GitHub repository and analyze if the library is a full JavaScript implementation (indicating new architecture support).
 
 ## Installation
@@ -27,7 +27,7 @@ npx rn-chk-new-arch
 Run the package in the root directory of your React Native project to check each library's compatibility with the new architecture:
 
 ```bash
-npx check-new-arch
+npx rn-chk-new-arch
 ```
 
 ````bash
@@ -50,6 +50,7 @@ Total: 3 | Supported: 1 | Not Supported: 1 | Not Found: 1
 Contributions are welcome! If you'd like to improve the package or add new features, please fork the repository and create a pull request.
 
 ### Test the library
+
 npm run test
 
 ## Development
@@ -59,7 +60,7 @@ To download and modify the code:
 - Clone the repository:
 
 ```bash
-git clone https://github.com/your-username/check-new-arch.git
+git clone https://github.com/arochedy/react-native-check-new-archi.git
 ```
 
 - Install dependencies
