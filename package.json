@@ -4,7 +4,7 @@
   "description": "Check if libraries in a React Native project support the new architecture",
   "repository": {
     "type": "git",
-    "url": "https://github.com/arochedy/react-native-check-new-archi.git"
+    "url": "git+https://github.com/arochedy/react-native-check-new-archi.git"
   },
   "scripts": {
     "build": "tsc",
