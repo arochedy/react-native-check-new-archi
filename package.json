@@ -13,7 +13,7 @@
     "README.md"
   ],
   "bin": {
-    "check-new-arch": "./dist/index.js"
+    "check-new-arch": "dist/index.js"
   },
   "dependencies": {
     "@types/node": "^22.8.6",
