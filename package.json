@@ -4,9 +4,14 @@
   "description": "Check if libraries in a React Native project support the new architecture",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
   },
   "main": "dist/index.js",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "bin": {
     "check-new-arch": "./dist/index.js"
   },
