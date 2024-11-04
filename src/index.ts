@@ -12,8 +12,8 @@ const COLORS = {
 // List of libraries to ignore
 const ignoredLibraries = ["react-native"];
 
-async function checkLibraries() {
-  const packageJson = JSON.parse(fs.readFileSync("package.json", "utf8"));
+export async function checkLibraries(path = "package.json") {
+  const packageJson = JSON.parse(fs.readFileSync(path, "utf8"));
   const dependencies = packageJson.dependencies || {};
   const libraries = Object.keys(dependencies).filter(
     (lib) => !ignoredLibraries.includes(lib)
@@ -36,7 +36,10 @@ async function checkLibraries() {
       if (data.libraries && data.libraries.length > 0) {
         const libraryData = data.libraries[0];
         const newArchSupport =
-          libraryData.expoGo || libraryData.github.newArchitecture || false;
+          libraryData.expoGo ||
+          libraryData.newArchitecture ||
+          libraryData.github.newArchitecture ||
+          false;
         const color = newArchSupport ? COLORS.green : COLORS.red;
 
         console.log(
@@ -83,6 +86,14 @@ async function checkLibraries() {
       `Not Supported: ${COLORS.red}${countKo}${COLORS.reset} | ` +
       `Not Found: ${COLORS.yellow}${countNotFound}${COLORS.reset}`
   );
+
+  // Return result (for testing purposes)
+  return {
+    total: libraries.length,
+    supported: countOk,
+    notSupported: countKo,
+    notFound: countNotFound,
+  };
 }
 
 async function getGitHubRepoUrl(libraryName: string): Promise<string | null> {
@@ -103,29 +114,50 @@ async function getGitHubRepoUrl(libraryName: string): Promise<string | null> {
 }
 
 async function checkIfFullJS(repoUrl: string) {
-  const packageJsonUrl = `${repoUrl.replace(
-    "https://github.com/",
-    "https://raw.githubusercontent.com/"
-  )}/refs/heads/master/package.json`;
+  let packageJsonData = await getPackageJsonDate(repoUrl, "master");
 
-  // https://raw.githubusercontent.com/react-navigation/react-navigation/refs/heads/main/package.json
-  // https://raw.githubusercontent.com/react-navigation/react-navigation/refs/heads/master/package.json
+  if (!packageJsonData) {
+    packageJsonData = await getPackageJsonDate(repoUrl, "main");
+  }
+
   try {
-    const response = await fetch(packageJsonUrl);
-    const data = await response.json();
+    const devDependencies = packageJsonData.devDependencies;
+    const dependencies = packageJsonData.dependencies;
 
-    // Check dependencies and devDependencies for native modules
-    const dependencies = { ...data.dependencies, ...data.devDependencies };
-    const hasNativeDeps = Object.keys(dependencies || {}).some((dep) =>
+    let hasNativeDeps = Object.keys(dependencies || {}).some((dep) =>
       dep.includes("react-native")
     );
 
+    hasNativeDeps &&
+      Object.keys(devDependencies || {}).some((dep) =>
+        dep.includes("react-native")
+      );
     return hasNativeDeps ? "native" : "fullJs";
-    //  // true if no native dependencies found
-  } catch (error) {
-    // console.error(`Error fetching package.json from ${repoUrl} ${packageJsonUrl}: ${error.message}`);
+  } catch (error: any) {
+    // console.error(
+    //   `Error fetching package.json from ${repoUrl} : ${error.message}`
+    // );
     return "notFound";
   }
 }
+
+const getPackageJsonDate = async (
+  repoUrl: string,
+  branchName: "master" | "main"
+) => {
+  try {
+    const packageJsonUrl = `${repoUrl.replace(
+      "https://github.com/",
+      "https://raw.githubusercontent.com/"
+    )}/refs/heads/${branchName}/package.json`;
+
+    const response = await fetch(repoUrl);
+    const data = await response.json();
+
+    return data;
+  } catch (error) {
+    return null;
+  }
+};
 
 checkLibraries();
