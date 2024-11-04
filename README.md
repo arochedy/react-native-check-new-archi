@@ -49,6 +49,9 @@ Total: 3 | Supported: 1 | Not Supported: 1 | Not Found: 1
 
 Contributions are welcome! If you'd like to improve the package or add new features, please fork the repository and create a pull request.
 
+### Test the library
+npm run test
+
 ## Development
 
 To download and modify the code:
