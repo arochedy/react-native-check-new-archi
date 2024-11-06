@@ -16,6 +16,12 @@ const COLORS = {
   yellow: "\x1b[33m",
 } as const;
 
+ const RESULT_CATEGORIES = {
+   fullJs: "supported",
+   native: "notSupported",
+   notFound: "notFound",
+ } as const;
+
 const IGNORED_LIBRARIES = ["react-native"];
 const FETCH_TIMEOUT = 10 * 1000;
 
@@ -30,14 +36,12 @@ if (packagePathArg) {
 }
 
 const showGroup = args.includes("--group") || args.includes("-g");
-let supportedOnly =
-  (args.includes("-s") || args.includes("--supported")) ?? true;
+let supportedOnly = args.includes("-s") || args.includes("--supported");
 let notSupportedOnly = args.includes("-ns") || args.includes("--not-supported");
-let notFoundOnly =
-  (args.includes("-nf") || args.includes("--not-found")) ?? true;
+let notFoundOnly = args.includes("-nf") || args.includes("--not-found");
 
 if (!supportedOnly && !notSupportedOnly && !notFoundOnly) {
-  //if no flags are provided, default to all librairies should be shown
+  //if no flags are provided, default to all libraries should be shown
   supportedOnly = true;
   notSupportedOnly = true;
   notFoundOnly = true;
@@ -58,13 +62,79 @@ async function fetchWithTimeout(url: string): Promise<Response> {
 
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetchWithTimeout(url);
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
   return response.json();
+}
+
+function updateCounts(
+  category: keyof Counts,
+  lib: string,
+  counts: Counts,
+  groupedResults: Record<keyof Counts, string[]>
+) {
+  counts[category]++;
+  groupedResults[category].push(lib);
+}
+
+function isValidPackageJson(data: unknown): data is PackageJson {
+  return !!data && typeof data === "object" && "dependencies" in data;
+}
+
+async function handleLibraryStatus(
+  lib: string,
+  counts: Counts,
+  groupedResults: Record<keyof Counts, string[]>
+) {
+  try {
+    const url = `https://reactnative.directory/api/libraries?search=${encodeURIComponent(
+      lib
+    )}`;
+    const data: LibraryData = await fetchJson(url);
+
+    if (data.libraries?.length) {
+      const newArchSupport = !!(
+        data.libraries[0].expoGo ||
+        data.libraries[0].newArchitecture ||
+        data.libraries[0].github?.newArchitecture
+      );
+      const status = newArchSupport ? "supported" : "notSupported";
+      displayLibraryStatus(lib, status);
+      updateCounts(status, lib, counts, groupedResults);
+      return;
+    }
+
+    const repoUrl = await getGitHubRepoUrl(lib);
+    if (repoUrl) {
+      const fullJsResult = await checkIfFullJS(repoUrl);
+      handleFullJsResult(fullJsResult, lib);
+      updateCounts(
+        RESULT_CATEGORIES[fullJsResult],
+        lib,
+        counts,
+        groupedResults
+      );
+      return;
+    }
+
+    displayLibraryStatus(lib, "notFound");
+    updateCounts("notFound", lib, counts, groupedResults);
+  } catch (error) {
+    console.error(`Error for library ${lib}: ${formatError(error)}`);
+    updateCounts("notFound", lib, counts, groupedResults);
+  }
 }
 
 export async function checkLibraries(path = packagePath): Promise<CheckResult> {
   console.log(`Checking libraries in ${path}...\n`);
-  const packageJson: PackageJson = JSON.parse(readFileSync(path, "utf8"));
-  const libraries = Object.keys(packageJson.dependencies ?? {}).filter(
+  const rawData = JSON.parse(readFileSync(path, "utf8"));
+
+  if (!isValidPackageJson(rawData)) {
+    throw new Error("Invalid package.json format");
+  }
+
+  const libraries = Object.keys(rawData.dependencies ?? {}).filter(
     (lib) => !IGNORED_LIBRARIES.includes(lib)
   );
 
@@ -78,84 +148,19 @@ export async function checkLibraries(path = packagePath): Promise<CheckResult> {
     notFound: [] as string[],
   };
 
-  // Track progress
-  let processed = 0;
+  const progress = new Set<string>();
 
   await Promise.all(
     libraries.map(async (lib) => {
-      try {
-        const url = `https://reactnative.directory/api/libraries?search=${encodeURIComponent(
-          lib
-        )}`;
-        const data: LibraryData = await fetchJson(url);
-
-        if (data.libraries?.length) {
-          const libraryData = data.libraries[0];
-          const newArchSupport = !!(
-            libraryData.expoGo ||
-            libraryData.newArchitecture ||
-            libraryData.github?.newArchitecture
-          );
-
-          const color = newArchSupport ? COLORS.green : COLORS.red;
-          const group = newArchSupport ? "supported" : "notSupported";
-          groupedResults[group].push(lib);
-
-          if (!showGroup) {
-            if (supportedOnly && newArchSupport) {
-              console.log(
-                `Library: ${lib}, supports new architecture: ${color}${newArchSupport}${COLORS.reset}`
-              );
-            }
-            if (notSupportedOnly && !newArchSupport) {
-              console.log(
-                `Library: ${lib}, supports new architecture: ${color}${newArchSupport}${COLORS.reset}`
-              );
-            }
-          }
-
-          counts[newArchSupport ? "supported" : "notSupported"]++;
-        } else {
-          const repoUrl = await getGitHubRepoUrl(lib);
-          if (repoUrl) {
-            const fullJsResult = await checkIfFullJS(repoUrl);
-            handleFullJsResult(fullJsResult, lib);
-
-            switch (fullJsResult) {
-              case "fullJs":
-                groupedResults.supported.push(lib);
-                counts["supported"]++;
-
-                break;
-              case "native":
-                groupedResults.notSupported.push(lib);
-                counts["notSupported"]++;
-
-                break;
-              case "notFound":
-                groupedResults.notFound.push(lib);
-                counts.notFound++;
-
-                break;
-            }
-          } else {
-            groupedResults.notFound.push(lib);
-            counts.notFound++;
-          }
-        }
-      } catch (error) {
-        console.error(`Error for library ${lib}: ${formatError(error)}`);
-        groupedResults.notFound.push(lib);
-        counts.notFound++;
-      }
-
-      processed++;
-      // Show progress
-      process.stdout.write(`Scanning ${processed} of ${libraries.length}...\r`);
+      await handleLibraryStatus(lib, counts, groupedResults);
+      progress.add(lib);
+      process.stdout.write(
+        `Scanning ${progress.size} of ${libraries.length}...\r`
+      );
     })
   );
 
-  console.log("\n"); // Clear progress line
+  console.log("\n");
 
   if (showGroup) {
     printGroupedResults(groupedResults);
@@ -165,9 +170,7 @@ export async function checkLibraries(path = packagePath): Promise<CheckResult> {
 
   return {
     total: libraries.length,
-    supported: counts.supported,
-    notSupported: counts.notSupported,
-    notFound: counts.notFound,
+    ...counts,
   };
 }
 
@@ -194,9 +197,9 @@ async function getGitHubRepoUrl(libraryName: string): Promise<string | null> {
   try {
     const url = `https://registry.npmjs.org/${encodeURIComponent(libraryName)}`;
     const data = await fetchJson<NpmRegistryResponse>(url);
-    return (
-      data.repository?.url?.replace("git+", "").replace(".git", "") ?? null
-    );
+    if (!data?.repository?.url) return null;
+
+    return data.repository.url.replace(/^git\+|\.git$/g, "");
   } catch (error) {
     console.error(
       `Error fetching GitHub URL for ${libraryName}: ${formatError(error)}`
@@ -225,38 +228,65 @@ async function getPackageJsonData(
 async function checkIfFullJS(
   repoUrl: string
 ): Promise<"fullJs" | "native" | "notFound"> {
-  const packageJsonData =
-    (await getPackageJsonData(repoUrl, "master")) ??
-    (await getPackageJsonData(repoUrl, "main"));
+  const branches = ["master", "main"];
+  let packageJsonData: PackageJson | null = null;
+
+  for (const branch of branches) {
+    packageJsonData = await getPackageJsonData(repoUrl, branch);
+    if (packageJsonData) break;
+  }
 
   if (!packageJsonData) return "notFound";
 
-  const hasNativeDeps = [
-    ...Object.keys(packageJsonData.dependencies ?? {}),
-    ...Object.keys(packageJsonData.devDependencies ?? {}),
-  ].some((dep) => dep.includes("react-native"));
+  const allDeps = {
+    ...packageJsonData.dependencies,
+    ...packageJsonData.devDependencies,
+  };
 
-  return hasNativeDeps ? "native" : "fullJs";
+  return Object.keys(allDeps).some((dep) => dep.includes("react-native"))
+    ? "native"
+    : "fullJs";
+}
+
+function displayLibraryStatus(
+  lib: string,
+  status: "supported" | "notSupported" | "notFound",
+) {
+  if (!showGroup) {
+    const messages = {
+      supported: `${COLORS.green}true${COLORS.reset}`,
+      notSupported: `${COLORS.red}false${COLORS.reset}`,
+      notFound: `${COLORS.yellow}not found${COLORS.reset}`,
+    };
+
+    const shouldDisplay =
+      (status === "supported" && supportedOnly) ||
+      (status === "notSupported" && notSupportedOnly) ||
+      (status === "notFound" && notFoundOnly);
+
+    if (shouldDisplay) {
+      console.log(
+        `Library: ${lib}, supports new architecture: ${messages[status]}`
+      );
+    }
+  }
 }
 
 function handleFullJsResult(
   result: "fullJs" | "native" | "notFound",
   lib: string
 ): void {
-  const messages = {
-    fullJs: `supports new architecture: ${COLORS.green}true${COLORS.reset} (full JS)`,
-    native: `${COLORS.yellow}has native dependencies, you must ask the owner${COLORS.reset}`,
-    notFound: `${COLORS.yellow}not found${COLORS.reset}`,
+  const statusMap = {
+    fullJs: { status: "supported" as const, details: "full JS" },
+    native: {
+      status: "notSupported" as const,
+      details: "has native dependencies",
+    },
+    notFound: { status: "notFound" as const },
   };
-  if (result === "fullJs" && supportedOnly) {
-    console.log(`Library: ${lib}, ${messages[result]}`);
-  }
-  if (result === "native" && notSupportedOnly) {
-    console.log(`Library: ${lib}, ${messages[result]}`);
-  }
-  if (result === "notFound" && notFoundOnly) {
-    console.log(`Library: ${lib}, ${messages[result]}`);
-  }
+
+  const { status } = statusMap[result];
+  displayLibraryStatus(lib, status);
 }
 
 function printResults(total: number, counts: Counts): void {
