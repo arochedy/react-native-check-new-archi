@@ -9,6 +9,7 @@ import {
   NpmRegistryResponse,
 } from "./types";
 
+// Constants
 const COLORS = {
   reset: "\x1b[0m",
   green: "\x1b[32m",
@@ -16,37 +17,62 @@ const COLORS = {
   yellow: "\x1b[33m",
 } as const;
 
+const STATUS_MAP = {
+  supported: { color: COLORS.green, message: "true", display: "Supported" },
+  notSupported: {
+    color: COLORS.red,
+    message: "false",
+    display: "Not Supported",
+  },
+  notFound: {
+    color: COLORS.yellow,
+    message: "not found",
+    display: "Not Found",
+  },
+} as const;
+
+const RESULT_CATEGORIES = {
+  fullJs: "supported",
+  native: "notSupported",
+  notFound: "notFound",
+} as const;
+
 const IGNORED_LIBRARIES = ["react-native"];
 const FETCH_TIMEOUT = 10 * 1000;
+const BRANCHES = ["master", "main"] as const;
 
-const args = process.argv.slice(2);
-let packagePath = "package.json";
-const packagePathArg = args.find(
-  (arg) => arg.startsWith("--path=") || arg.startsWith("-p=")
-);
+// Argument parsing
+function parseArguments() {
+  const args = process.argv.slice(2);
+  const packagePath =
+    args
+      .find((arg) => arg.startsWith("--path=") || arg.startsWith("-p="))
+      ?.split("=")[1] ?? "package.json";
 
-if (packagePathArg) {
-  packagePath = packagePathArg.split("=")[1];
+  const showGroup = args.includes("--group") || args.includes("-g");
+  const flags = {
+    supported: args.includes("-s") || args.includes("--supported"),
+    notSupported: args.includes("-ns") || args.includes("--not-supported"),
+    notFound: args.includes("-nf") || args.includes("--not-found"),
+  };
+
+  if (!Object.values(flags).some(Boolean)) {
+    flags.supported = flags.notSupported = flags.notFound = true;
+  }
+
+  return { packagePath, showGroup, flags };
 }
 
-const showGroup = args.includes("--group") || args.includes("-g");
-let supportedOnly =
-  (args.includes("-s") || args.includes("--supported")) ?? true;
-let notSupportedOnly = args.includes("-ns") || args.includes("--not-supported");
-let notFoundOnly =
-  (args.includes("-nf") || args.includes("--not-found")) ?? true;
-
-if (!supportedOnly && !notSupportedOnly && !notFoundOnly) {
-  //if no flags are provided, default to all librairies should be shown
-  supportedOnly = true;
-  notSupportedOnly = true;
-  notFoundOnly = true;
-}
-
+// Utility functions
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error";
 }
 
+function isValidPackageJson(data: unknown): data is PackageJson {
+  return !!data && typeof data === "object" && "dependencies" in data;
+}
+
+// Network functions
 async function fetchWithTimeout(url: string): Promise<Response> {
   return Promise.race([
     fetch(url),
@@ -56,147 +82,66 @@ async function fetchWithTimeout(url: string): Promise<Response> {
   ]);
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetchWithTimeout(url);
-  return response.json();
+async function fetchWithRetry<T>(url: string, retries = 3): Promise<T> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const response = await fetchWithTimeout(url);
+      if (!response.ok)
+        throw new Error(`HTTP error! status: ${response.status}`);
+      return response.json();
+    } catch (error) {
+      if (i === retries - 1) throw error;
+    }
+  }
+  throw new Error("Max retries reached");
 }
 
-export async function checkLibraries(path = packagePath): Promise<CheckResult> {
-  console.log(`Checking libraries in ${path}...\n`);
-  const packageJson: PackageJson = JSON.parse(readFileSync(path, "utf8"));
-  const libraries = Object.keys(packageJson.dependencies ?? {}).filter(
-    (lib) => !IGNORED_LIBRARIES.includes(lib)
+// Display functions
+function displayStatus(
+  lib: string,
+  status: keyof typeof STATUS_MAP,
+  showGroup: boolean,
+  flags: Record<string, boolean>
+) {
+  if (!showGroup && flags[status]) {
+    const { color, message } = STATUS_MAP[status];
+    console.log(
+      `Library: ${lib}, supports new architecture: ${color}${message}${COLORS.reset}`
+    );
+  }
+}
+
+function displayResults(
+  results: Record<string, string[]>,
+  flags: Record<string, boolean>
+) {
+  Object.entries(results).forEach(([status, libs]) => {
+    if (flags[status] && libs.length > 0)  {
+      console.log(
+        `${STATUS_MAP[status as keyof typeof STATUS_MAP].display} Libraries:`
+      );
+      libs.forEach((lib) => console.log(lib));
+    }
+  });
+}
+
+function printSummary(total: number, counts: Counts): void {
+  const { green, red, yellow, reset } = COLORS;
+  console.log(
+    `Total: ${total} | ` +
+      `Supported: ${green}${counts.supported}${reset} | ` +
+      `Not Supported: ${red}${counts.notSupported}${reset} | ` +
+      `Not Found: ${yellow}${counts.notFound}${reset}`
   );
-
-  console.log(`${libraries.length} libraries found\n`);
-  console.log("Checking libraries...\n");
-
-  const counts: Counts = { supported: 0, notSupported: 0, notFound: 0 };
-  const groupedResults = {
-    supported: [] as string[],
-    notSupported: [] as string[],
-    notFound: [] as string[],
-  };
-
-  // Track progress
-  let processed = 0;
-
-  await Promise.all(
-    libraries.map(async (lib) => {
-      try {
-        const url = `https://reactnative.directory/api/libraries?search=${encodeURIComponent(
-          lib
-        )}`;
-        const data: LibraryData = await fetchJson(url);
-
-        if (data.libraries?.length) {
-          const libraryData = data.libraries[0];
-          const newArchSupport = !!(
-            libraryData.expoGo ||
-            libraryData.newArchitecture ||
-            libraryData.github?.newArchitecture
-          );
-
-          const color = newArchSupport ? COLORS.green : COLORS.red;
-          const group = newArchSupport ? "supported" : "notSupported";
-          groupedResults[group].push(lib);
-
-          if (!showGroup) {
-            if (supportedOnly && newArchSupport) {
-              console.log(
-                `Library: ${lib}, supports new architecture: ${color}${newArchSupport}${COLORS.reset}`
-              );
-            }
-            if (notSupportedOnly && !newArchSupport) {
-              console.log(
-                `Library: ${lib}, supports new architecture: ${color}${newArchSupport}${COLORS.reset}`
-              );
-            }
-          }
-
-          counts[newArchSupport ? "supported" : "notSupported"]++;
-        } else {
-          const repoUrl = await getGitHubRepoUrl(lib);
-          if (repoUrl) {
-            const fullJsResult = await checkIfFullJS(repoUrl);
-            handleFullJsResult(fullJsResult, lib);
-
-            switch (fullJsResult) {
-              case "fullJs":
-                groupedResults.supported.push(lib);
-                counts["supported"]++;
-
-                break;
-              case "native":
-                groupedResults.notSupported.push(lib);
-                counts["notSupported"]++;
-
-                break;
-              case "notFound":
-                groupedResults.notFound.push(lib);
-                counts.notFound++;
-
-                break;
-            }
-          } else {
-            groupedResults.notFound.push(lib);
-            counts.notFound++;
-          }
-        }
-      } catch (error) {
-        console.error(`Error for library ${lib}: ${formatError(error)}`);
-        groupedResults.notFound.push(lib);
-        counts.notFound++;
-      }
-
-      processed++;
-      // Show progress
-      process.stdout.write(`Scanning ${processed} of ${libraries.length}...\r`);
-    })
-  );
-
-  console.log("\n"); // Clear progress line
-
-  if (showGroup) {
-    printGroupedResults(groupedResults);
-  } else {
-    printResults(libraries.length, counts);
-  }
-
-  return {
-    total: libraries.length,
-    supported: counts.supported,
-    notSupported: counts.notSupported,
-    notFound: counts.notFound,
-  };
 }
 
-function printGroupedResults(results: {
-  supported: string[];
-  notSupported: string[];
-  notFound: string[];
-}): void {
-  if (supportedOnly) {
-    console.log("\nSupported Libraries:");
-    results.supported.forEach((lib) => console.log(lib));
-  }
-  if (notSupportedOnly) {
-    console.log("\nNot Supported Libraries:");
-    results.notSupported.forEach((lib) => console.log(lib));
-  }
-  if (notFoundOnly) {
-    console.log("\nNot Found Libraries:");
-    results.notFound.forEach((lib) => console.log(lib));
-  }
-}
-
+// Library checking functions
 async function getGitHubRepoUrl(libraryName: string): Promise<string | null> {
   try {
-    const url = `https://registry.npmjs.org/${encodeURIComponent(libraryName)}`;
-    const data = await fetchJson<NpmRegistryResponse>(url);
-    return (
-      data.repository?.url?.replace("git+", "").replace(".git", "") ?? null
+    const data = await fetchWithRetry<NpmRegistryResponse>(
+      `https://registry.npmjs.org/${encodeURIComponent(libraryName)}`
     );
+    return data?.repository?.url?.replace(/^git\+|\.git$/g, "") ?? null;
   } catch (error) {
     console.error(
       `Error fetching GitHub URL for ${libraryName}: ${formatError(error)}`
@@ -205,68 +150,120 @@ async function getGitHubRepoUrl(libraryName: string): Promise<string | null> {
   }
 }
 
-async function getPackageJsonData(
-  repoUrl: string,
-  branch: string
-): Promise<PackageJson | null> {
-  try {
-    const packageJsonUrl = `${repoUrl.replace(
-      "https://github.com",
-      "https://raw.githubusercontent.com"
-    )}/${branch}/package.json`;
-
-    const response = await fetchWithTimeout(packageJsonUrl);
-    return response.ok ? response.json() : null;
-  } catch {
-    return null;
-  }
-}
-
 async function checkIfFullJS(
   repoUrl: string
-): Promise<"fullJs" | "native" | "notFound"> {
-  const packageJsonData =
-    (await getPackageJsonData(repoUrl, "master")) ??
-    (await getPackageJsonData(repoUrl, "main"));
+): Promise<keyof typeof RESULT_CATEGORIES> {
+  for (const branch of BRANCHES) {
+    try {
+      const packageJson = await fetchWithRetry<PackageJson>(
+        `${repoUrl.replace(
+          "https://github.com",
+          "https://raw.githubusercontent.com"
+        )}/${branch}/package.json`
+      );
 
-  if (!packageJsonData) return "notFound";
+      const hasNativeDeps = [
+        ...Object.keys(packageJson.dependencies ?? {}),
+        ...Object.keys(packageJson.devDependencies ?? {}),
+      ].some((dep) => dep.includes("react-native"));
 
-  const hasNativeDeps = [
-    ...Object.keys(packageJsonData.dependencies ?? {}),
-    ...Object.keys(packageJsonData.devDependencies ?? {}),
-  ].some((dep) => dep.includes("react-native"));
-
-  return hasNativeDeps ? "native" : "fullJs";
+      return hasNativeDeps ? "native" : "fullJs";
+    } catch {}
+  }
+  return "notFound";
 }
 
-function handleFullJsResult(
-  result: "fullJs" | "native" | "notFound",
-  lib: string
-): void {
-  const messages = {
-    fullJs: `supports new architecture: ${COLORS.green}true${COLORS.reset} (full JS)`,
-    native: `${COLORS.yellow}has native dependencies, you must ask the owner${COLORS.reset}`,
-    notFound: `${COLORS.yellow}not found${COLORS.reset}`,
-  };
-  if (result === "fullJs" && supportedOnly) {
-    console.log(`Library: ${lib}, ${messages[result]}`);
-  }
-  if (result === "native" && notSupportedOnly) {
-    console.log(`Library: ${lib}, ${messages[result]}`);
-  }
-  if (result === "notFound" && notFoundOnly) {
-    console.log(`Library: ${lib}, ${messages[result]}`);
+async function checkLibrary(
+  lib: string,
+  counts: Counts,
+  results: Record<keyof Counts, string[]>,
+  config: { showGroup: boolean; flags: Record<string, boolean> }
+): Promise<void> {
+  try {
+    const directoryData = await fetchWithRetry<LibraryData>(
+      `https://reactnative.directory/api/libraries?search=${encodeURIComponent(
+        lib
+      )}`
+    );
+
+    let status: keyof typeof STATUS_MAP;
+
+    if (directoryData.libraries?.length) {
+      const { expoGo, newArchitecture, github } = directoryData.libraries[0];
+      status =
+        expoGo || newArchitecture || github?.newArchitecture
+          ? "supported"
+          : "notSupported";
+    } else {
+      const repoUrl = await getGitHubRepoUrl(lib);
+      if (!repoUrl) {
+        status = "notFound";
+      } else {
+        const fullJsResult = await checkIfFullJS(repoUrl);
+        status = RESULT_CATEGORIES[fullJsResult];
+      }
+    }
+
+    counts[status]++;
+    results[status].push(lib);
+    displayStatus(lib, status, config.showGroup, config.flags);
+  } catch (error) {
+    console.error(`Error checking ${lib}: ${formatError(error)}`);
+    counts.notFound++;
+    results.notFound.push(lib);
   }
 }
 
-function printResults(total: number, counts: Counts): void {
-  const { green, red, yellow, reset } = COLORS;
-  console.log(
-    `Total: ${total} | ` +
-      `Supported: ${green}${counts.supported}${reset} | ` +
-      `Not Supported: ${red}${counts.notSupported}${reset} | ` +
-      `Not Found: ${yellow}${counts.notFound}${reset}`
+// Main function
+export async function checkLibraries(path?: string): Promise<CheckResult> {
+  const { packagePath, showGroup, flags } = parseArguments();
+  const finalPath = path ?? packagePath;
+
+  console.log(`Checking libraries in ${finalPath}...\n`);
+  const rawData = JSON.parse(readFileSync(finalPath, "utf8"));
+
+  if (!isValidPackageJson(rawData)) {
+    throw new Error("Invalid package.json format");
+  }
+
+  const libraries = Object.keys(rawData.dependencies ?? {}).filter(
+    (lib) => !IGNORED_LIBRARIES.includes(lib)
   );
+
+  console.log(`${libraries.length} libraries found\n`);
+  console.log("Checking libraries...\n");
+
+  const counts: Counts = { supported: 0, notSupported: 0, notFound: 0 };
+  const results = {
+    supported: [] as string[],
+    notSupported: [] as string[],
+    notFound: [] as string[],
+  };
+
+  const progress = new Set<string>();
+
+  await Promise.all(
+    libraries.map(async (lib) => {
+      await checkLibrary(lib, counts, results, { showGroup, flags });
+      progress.add(lib);
+      process.stdout.write(
+        `Scanning ${progress.size} of ${libraries.length}...\r`
+      );
+    })
+  );
+
+  console.log("\n");
+
+  if (showGroup) {
+    displayResults(results, flags);
+  } else {
+    printSummary(libraries.length, counts);
+  }
+
+  return {
+    total: libraries.length,
+    ...counts,
+  };
 }
 
 if (require.main === module) {
