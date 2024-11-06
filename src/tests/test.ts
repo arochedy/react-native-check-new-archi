@@ -7,6 +7,7 @@ import { promisify } from "util";
 
 const execPromise = promisify(exec);
 
+// Constants
 const TEST_DIR = path.join(__dirname, "fixtures");
 const TEST_PACKAGE_JSON_PATH = path.join(TEST_DIR, "package.json");
 
@@ -20,33 +21,30 @@ const TEST_DEPENDENCIES = {
   "react-navigation": "^5.0.0",
 };
 
-const NOT_FOUND_GROUP_TITLE = "Not Found Libraries";
-const SUPPORTED_GROUP_TITLE = "Supported Libraries";
-const NOT_SUPPORTED_GROUP_TITLE = "Not Supported Libraries";
+const GROUPS = {
+  SUPPORTED: "Supported Libraries",
+  NOT_SUPPORTED: "Not Supported Libraries",
+  NOT_FOUND: "Not Found Libraries",
+} as const;
 
-const NOT_FOUND = "not found";
-const SUPPORTED = "true";
-const NOT_SUPPORTED = "false";
+const STATUS = {
+  SUPPORTED: "true",
+  NOT_SUPPORTED: "false",
+  NOT_FOUND: "not found",
+} as const;
 
 const EXPECTED = {
   total: 6,
   supported: 3,
   notSupported: 1,
   notFound: 2,
-} as const;
+};
 
-const SUPPORTED_LIBRARIES = [
-  "react-navigation",
-  "axios",
-  "@notifee/react-native",
-];
-
-const NOT_SUPPORTED_LIBRARIES = ["react-native-version-check"];
-
-const NOT_FOUND_LIBRARIES = [
-  "react-native-loggly-jslogger",
-  "@react-native/normalize-color",
-];
+const LIBRARIES = {
+  SUPPORTED: ["react-navigation", "axios", "@notifee/react-native"],
+  NOT_SUPPORTED: ["react-native-version-check"],
+  NOT_FOUND: ["react-native-loggly-jslogger", "@react-native/normalize-color"],
+};
 
 function handleTestFiles(cleanup = false): void {
   if (cleanup) {
@@ -56,38 +54,32 @@ function handleTestFiles(cleanup = false): void {
     return;
   }
 
-  if (!fs.existsSync(TEST_DIR)) {
-    fs.mkdirSync(TEST_DIR, { recursive: true });
-  }
+  !fs.existsSync(TEST_DIR) && fs.mkdirSync(TEST_DIR, { recursive: true });
   fs.writeFileSync(
     TEST_PACKAGE_JSON_PATH,
     JSON.stringify({ dependencies: TEST_DEPENDENCIES }, null, 2)
   );
 }
 
-async function testArgument(
-  arg: string,
-  expected: string[],
-  notExpected?: string[]
-) {
+async function testArgument(config: {
+  arg: string;
+  expected: string[];
+  notExpected?: string[];
+}) {
   try {
-    const { stdout } = await execPromise(`node ./dist/index.js ${arg}`);
-    console.log(stdout);
-    for (const expectedStr of expected) {
+    const { stdout } = await execPromise(`node ./dist/index.js ${config.arg}`);
+    config.expected.forEach((exp) =>
+      assert(stdout.includes(exp), `Expected output to include "${exp}"`)
+    );
+    config.notExpected?.forEach((notExp) =>
       assert(
-        stdout.includes(expectedStr),
-        `Expected output to include "${expectedStr}"`
-      );
-    }
-    for (const notExpectedStr of notExpected ?? []) {
-      assert(
-        !stdout.includes(notExpectedStr),
-        `Expected output not to include "${notExpectedStr}"`
-      );
-    }
-    console.log(`✓ Test with argument "${arg}" passed`);
+        !stdout.includes(notExp),
+        `Expected output not to include "${notExp}"`
+      )
+    );
+    console.log(`✓ Test with argument "${config.arg}" passed`);
   } catch (error) {
-    console.error(`✗ Test with argument "${arg}" failed: ${error}`);
+    console.error(`✗ Test with argument "${config.arg}" failed: ${error}`);
     process.exit(1);
   }
 }
@@ -99,101 +91,117 @@ async function runTests(): Promise<void> {
     handleTestFiles();
     const result = await checkLibraries(TEST_PACKAGE_JSON_PATH);
 
+    // Verify expected results
     Object.entries(EXPECTED).forEach(([key, value]) => {
-      const actual = result[key as keyof typeof result];
-      assert.strictEqual(actual, value, `Expected ${value} ${key}`);
+      assert.strictEqual(
+        result[key as keyof typeof result],
+        value,
+        `Expected ${value} ${key}`
+      );
     });
 
-    // Test arguments
-    await testArgument(`--path=${TEST_PACKAGE_JSON_PATH} --group`, [
-      NOT_SUPPORTED_GROUP_TITLE,
-      SUPPORTED_GROUP_TITLE,
-      NOT_FOUND_GROUP_TITLE,
-    ]);
-    await testArgument(
-      `--path=${TEST_PACKAGE_JSON_PATH}  -s`,
-      [SUPPORTED, ...SUPPORTED_LIBRARIES],
-      [
-        NOT_SUPPORTED,
-        NOT_FOUND,
-        ...NOT_SUPPORTED_LIBRARIES,
-        ...NOT_FOUND_LIBRARIES,
-      ]
-    );
+    // Test cases
+    const testCases = [
+      {
+        arg: `--path=${TEST_PACKAGE_JSON_PATH} --group`,
+        expected: [GROUPS.NOT_SUPPORTED, GROUPS.SUPPORTED, GROUPS.NOT_FOUND],
+      },
+      {
+        arg: `--path=${TEST_PACKAGE_JSON_PATH} -s`,
+        expected: [STATUS.SUPPORTED, ...LIBRARIES.SUPPORTED],
+        notExpected: [
+          STATUS.NOT_SUPPORTED,
+          STATUS.NOT_FOUND,
+          ...LIBRARIES.NOT_SUPPORTED,
+          ...LIBRARIES.NOT_FOUND,
+        ],
+      },
+      {
+        arg: `--path=${TEST_PACKAGE_JSON_PATH} --supported`,
+        expected: [STATUS.SUPPORTED, ...LIBRARIES.SUPPORTED],
+        notExpected: [
+          STATUS.NOT_SUPPORTED,
+          STATUS.NOT_FOUND,
+          ...LIBRARIES.NOT_SUPPORTED,
+          ...LIBRARIES.NOT_FOUND,
+        ],
+      },
+      {
+        arg: `--path=${TEST_PACKAGE_JSON_PATH} -ns`,
+        expected: [STATUS.NOT_SUPPORTED, ...LIBRARIES.NOT_SUPPORTED],
+        notExpected: [
+          STATUS.SUPPORTED,
+          STATUS.NOT_FOUND,
+          ...LIBRARIES.SUPPORTED,
+          ...LIBRARIES.NOT_FOUND,
+        ],
+      },
+      {
+        arg: `--path=${TEST_PACKAGE_JSON_PATH} --not-supported`,
+        expected: [STATUS.NOT_SUPPORTED, ...LIBRARIES.NOT_SUPPORTED],
+        notExpected: [
+          STATUS.SUPPORTED,
+          STATUS.NOT_FOUND,
+          ...LIBRARIES.SUPPORTED,
+          ...LIBRARIES.NOT_FOUND,
+        ],
+      },
+      {
+        arg: `--path=${TEST_PACKAGE_JSON_PATH} -nf`,
+        expected: [STATUS.NOT_FOUND, ...LIBRARIES.NOT_FOUND],
+        notExpected: [
+          STATUS.SUPPORTED,
+          STATUS.NOT_SUPPORTED,
+          ...LIBRARIES.SUPPORTED,
+          ...LIBRARIES.NOT_SUPPORTED,
+        ],
+      },
+      {
+        arg: `--path=${TEST_PACKAGE_JSON_PATH} --not-found`,
+        expected: [STATUS.NOT_FOUND, ...LIBRARIES.NOT_FOUND],
+        notExpected: [
+          STATUS.SUPPORTED,
+          STATUS.NOT_SUPPORTED,
+          ...LIBRARIES.SUPPORTED,
+          ...LIBRARIES.NOT_SUPPORTED,
+        ],
+      },
 
-    await testArgument(
-      `--path=${TEST_PACKAGE_JSON_PATH}  --supported`,
-      [SUPPORTED, ...SUPPORTED_LIBRARIES],
-      [
-        NOT_SUPPORTED,
-        NOT_FOUND,
-        ...NOT_SUPPORTED_LIBRARIES,
-        ...NOT_FOUND_LIBRARIES,
-      ]
-    );
-    await testArgument(
-      `--path=${TEST_PACKAGE_JSON_PATH}  -ns`,
-      [NOT_SUPPORTED, ...NOT_SUPPORTED_LIBRARIES],
-      [SUPPORTED, NOT_FOUND, ...SUPPORTED_LIBRARIES, ...NOT_FOUND_LIBRARIES]
-    );
+      {
+        arg: `--path=${TEST_PACKAGE_JSON_PATH} -s --group`,
+        expected: [GROUPS.SUPPORTED, ...LIBRARIES.SUPPORTED],
+        notExpected: [
+          GROUPS.NOT_SUPPORTED,
+          GROUPS.NOT_FOUND,
+          ...LIBRARIES.NOT_SUPPORTED,
+          ...LIBRARIES.NOT_FOUND,
+        ],
+      },
+      {
+        arg: `--path=${TEST_PACKAGE_JSON_PATH} -s -nf --group`,
+        expected: [
+          GROUPS.SUPPORTED,
+          GROUPS.NOT_FOUND,
+          ...LIBRARIES.SUPPORTED,
+          ...LIBRARIES.NOT_FOUND,
+        ],
+        notExpected: [GROUPS.NOT_SUPPORTED, ...LIBRARIES.NOT_SUPPORTED],
+      },
+      {
+        arg: `--path=${TEST_PACKAGE_JSON_PATH} -s -ns --group`,
+        expected: [
+          GROUPS.SUPPORTED,
+          GROUPS.NOT_SUPPORTED,
+          ...LIBRARIES.SUPPORTED,
+          ...LIBRARIES.NOT_SUPPORTED,
+        ],
+        notExpected: [GROUPS.NOT_FOUND, ...LIBRARIES.NOT_FOUND],
+      },
+    ];
 
-    await testArgument(
-      `--path=${TEST_PACKAGE_JSON_PATH}  --not-supported`,
-      [NOT_SUPPORTED, ...NOT_SUPPORTED_LIBRARIES],
-      [SUPPORTED, NOT_FOUND, ...SUPPORTED_LIBRARIES, ...NOT_FOUND_LIBRARIES]
-    );
-    await testArgument(
-      `--path=${TEST_PACKAGE_JSON_PATH}  -nf`,
-      [NOT_FOUND, ...NOT_FOUND_LIBRARIES],
-      [
-        SUPPORTED,
-        NOT_SUPPORTED,
-        ...SUPPORTED_LIBRARIES,
-        ...NOT_SUPPORTED_LIBRARIES,
-      ]
-    );
-
-    await testArgument(
-      `--path=${TEST_PACKAGE_JSON_PATH}  --not-found`,
-      [NOT_FOUND, ...NOT_FOUND_LIBRARIES],
-      [
-        SUPPORTED,
-        NOT_SUPPORTED,
-        ...SUPPORTED_LIBRARIES,
-        ...NOT_SUPPORTED_LIBRARIES,
-      ]
-    );
-    await testArgument(
-      `--path=${TEST_PACKAGE_JSON_PATH}  -s --group`,
-      [SUPPORTED_GROUP_TITLE, ...SUPPORTED_LIBRARIES],
-      [
-        NOT_SUPPORTED_GROUP_TITLE,
-        NOT_FOUND_GROUP_TITLE,
-        ...NOT_SUPPORTED_LIBRARIES,
-        ...NOT_FOUND_LIBRARIES,
-      ]
-    );
-
-    await testArgument(
-      `--path=${TEST_PACKAGE_JSON_PATH}  -s -nf --group`,
-      [
-        SUPPORTED_GROUP_TITLE,
-        NOT_FOUND_GROUP_TITLE,
-        ...SUPPORTED_LIBRARIES,
-        ...NOT_FOUND_LIBRARIES,
-      ],
-      [NOT_SUPPORTED_GROUP_TITLE]
-    );
-
-    await testArgument(
-      "--path=./dist/tests/fixtures/package.json  -s -ns --group",
-      [
-        NOT_SUPPORTED_GROUP_TITLE,
-        SUPPORTED_GROUP_TITLE,
-        "react-native-version-check",
-      ],
-      [NOT_FOUND_GROUP_TITLE, ...NOT_FOUND_LIBRARIES]
-    );
+    for (const testCase of testCases) {
+      await testArgument(testCase);
+    }
 
     console.log("✓ All tests passed successfully");
   } catch (error) {
