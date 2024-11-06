@@ -45,13 +45,125 @@ Total: 3 | Supported: 1 | Not Supported: 1 | Not Found: 1
 
 ````
 
+### Options
+
+#### path
+
+Specify the path to the React Native project directory:
+
+```bash
+
+npx rn-chk-new-arch --path=/path/to/your/project/package.json
+```
+
+#### group
+
+Group librairies by their support (Supported, Not supported, Not found)
+
+```bash
+
+npx rn-chk-new-arch --group
+```
+
+Result example
+
+```bash
+Supported Libraries:
+@notifee/react-native
+axios
+react-navigation
+
+Not Supported Libraries:
+react-native-version-check
+
+Not Found Libraries:
+react-native-loggly-jslogger
+@react-native/normalize-color
+```
+
+#### Statuts filter
+
+Filter librairies by their support (Supported, Not supported, Not found)
+You can combine filter
+
+##### supported : -s or --supported
+
+```bash
+
+npx rn-chk-new-arch -s
+```
+
+```bash
+
+npx rn-chk-new-arch --supported
+```
+
+Result example
+
+```bash
+Library: axios, supports new architecture: true
+Library: @notifee/react-native, supports new architecture: true
+Library: react-navigation, supports new architecture: true
+```
+
+##### not supported : -ns or --not-supported
+
+```bash
+npx rn-chk-new-arch -ns
+```
+
+```bash
+npx rn-chk-new-arch --not-supported
+```
+
+Result example
+
+```bash
+Library: react-native-version-check, supports new architecture: false
+```
+
+##### not found : -nf or --not-found
+
+```bash
+npx rn-chk-new-arch -nf
+```
+
+Result example
+
+```bash
+Library: react-native-loggly-jslogger, not found
+Library: @react-native/normalize-color, not found
+```
+
+#### combine group & filter
+
+```bash
+
+npx rn-chk-new-arch --group -s -ns
+```
+
+Result example
+
+```bash
+Supported Libraries:
+@notifee/react-native
+axios
+react-navigation
+
+Not Supported Libraries:
+react-native-version-check
+
+```
+
 ## Contributing
 
 Contributions are welcome! If you'd like to improve the package or add new features, please fork the repository and create a pull request.
 
 ### Test the library
 
+```bash
 npm run test
+```
 
 ## Development
 
