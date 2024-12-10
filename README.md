@@ -1,26 +1,13 @@
 # Check New Architecture Support
 
-This package checks if the libraries used in a React Native project support the new architecture. It leverages the React Native Directory API to verify compatibility and, if not listed, analyzes the GitHub repository for any native dependencies.
+This package checks if the libraries used in a React Native project support the new architecture.  
+It leverages the React Native Directory API to verify compatibility and, if not listed, analyzes the GitHub repository for any native dependencies.
 
 ## Features
 
 - Checks each library in `package.json` to see if it supports the new architecture.
 - Uses [React Native Directory API](https://reactnative.directory/) to fetch compatibility data.
 - If the library isn't found, it attempts to locate the GitHub repository and analyze if the library is a full JavaScript implementation (indicating new architecture support).
-
-## Installation
-
-Install globally via npm:
-
-```bash
-npm install -g rn-chk-new-arch
-```
-
-Or run directly with npx:
-
-```bash
-npx rn-chk-new-arch
-```
 
 ## Usage
 
@@ -47,21 +34,40 @@ Total: 3 | Supported: 1 | Not Supported: 1 | Not Found: 1
 
 ### Options
 
+```bash
+npx rn-chk-new-arch [options]
+
+options:
+
+    --path
+            Path to the React Native project package.json file.
+
+    -group
+           Group libraries by their support (Supported, Not supported, Not found).
+
+    -s, --supported
+            Supported libraries
+
+    -ns, --not-supported
+            Not supported libraries
+    
+     -nf, --not-found
+            Not found libraries
+```
+
 #### path
 
 Specify the path to the React Native project directory:
 
 ```bash
-
 npx rn-chk-new-arch --path=/path/to/your/project/package.json
 ```
 
 #### group
 
-Group librairies by their support (Supported, Not supported, Not found)
+Group libraries by their support (Supported, Not supported, Not found)
 
 ```bash
-
 npx rn-chk-new-arch --group
 ```
 
@@ -81,20 +87,18 @@ react-native-loggly-jslogger
 @react-native/normalize-color
 ```
 
-#### Statuts filter
+#### Status filter
 
-Filter librairies by their support (Supported, Not supported, Not found)
+Filter libraries by their support (Supported, Not supported, Not found)
 You can combine filter
 
 ##### supported : -s or --supported
 
 ```bash
-
 npx rn-chk-new-arch -s
 ```
 
 ```bash
-
 npx rn-chk-new-arch --supported
 ```
 
@@ -128,6 +132,10 @@ Library: react-native-version-check, supports new architecture: false
 npx rn-chk-new-arch -nf
 ```
 
+```bash
+npx rn-chk-new-arch --not-found
+```
+
 Result example
 
 ```bash
@@ -138,7 +146,6 @@ Library: @react-native/normalize-color, not found
 #### combine group & filter
 
 ```bash
-
 npx rn-chk-new-arch --group -s -ns
 ```
 
